@@ -571,4 +571,104 @@ $ docker run --entrypoint sleep2.0 ubuntu-sleeper 10
 
 * `docker run --network=wp-mysql-network -e DB_Host=mysql-db -e DB_Password=db_pass123 -p 38080:8080 --name webapp --link mysql-db:mysql-db -d kodekloud/simple-webapp-mysql`
 
+
 # Docker Storage
+* Docker storage drivers and file systems
+  * Where and how docker stores data?
+  * How it manages file systems of the containers? 
+
+## How Docker stores data on the local file system
+
+* When Docker is installed on a systems, it creates a folder structures at:
+  * `/var/lib/docker`
+  * This is where Docker stores all its data by default. This data includes files related to images and containers running on the host. 
+      * `containers`: All files related to containers
+      * `image`: All files related to images
+      * `volumes`: Volumes created by the Docker containers
+      * `aufs`: 
+
+
+* Where and in what format does docker store files related to images and containers? 
+  * **Layered Architecture** (recap): remember that **each line of instruction in the Dockerfile created a new layer in the docker image with just the changes from previous layer**
+  * Each layer only adds what is needed on top of the previous layer. 
+  * In this way, the layers are very efficient and can be very small in size (even zero or some bytes) 
+  * Also note that **Docker does not recreate layers that are common (the same) between different containers (Dockerfile)**
+  * For example, of two applications relay on Ubuntu image as teh first layer (instruction in Dockerfile), there will be only one Ubuntu layer that is shared between them. 
+  * This way Docker creates its images faster and efficiently saves disk space.  
+  * This is also the case whenever we update the application code: Docker reuses all the previous layers form cache and quickly rebuilds the application image by updating the latest source code and the layers above it. Thus saving a lot of time during rebuilds and updates. 
+
+![alt](./images/shared_layers.png)
+
+* All layers of the image on bottom-up, for example from the base image up to the entry-point, form the **docker image layer**. These image layers are read-only and cannot be changed. If we want to change them, we have to rebuild the image. 
+
+* When we run the `docker run <image-name>` command, a *writeable* **container layer** is created on top of the image layers. This writable layer now contains all the files and data of the container, such as log files by the applications, any temporary files created by the container, or just any file created by the user on that container. 
+
+* The life of this layer is only as long as the container is alive. When the container is destroyed, this last layer and all the changes stored in it are also destroyed. 
+
+* Remember that the same image layers is shared by all the containers created using this image. 
+
+* In the writable container layer, the user can create new files. The application code though (that was used to create teh image) is part of the image layer and hence is read-only and cannot be modified. This is good. 
+
+* However it is still possible to modify application files in the writable container layer using the **copy-on-write** mechanism: Whenever we change some file that belongs to the image layer (e.g. a file in our application code), *a copy of that file* is created in the writable container layer that we can manipulate. 
+* Note that whenever we delete the container, all the modified files and newly added files in the writeable container layer al also lost. 
+
+## Volumes
+
+* What if we want to persist the data created in the container layer? 
+  * For example if we want to persist the data created by a database running inside a container? 
+
+* For that we can add **a persistent volume** to the container: 
+  * first create a volume using `docker volume cerate <volume-name>` command.
+  * It creates a folder with the given `<volume-name>` (let's say its name is `data_volume`) under the `/var/lib/docker/volumes` folder.  
+  * Then when we run the docker container using the `docker run` command, we can mount that volume into writeable container layer: 
+  * `docker run -v data_volume:/var/lib/mysql mysql`
+  * The `-v data_volume:/var/lib/mysql` mounts the `data_volume` volume into the mount point `/var/lib/mysql` in the container. 
+  * This way all the data created by the (in this example) mysql are in fact stored in the `data_volume` volume (folder) on the host. 
+  * Even if the container is destroyed (deleted), the data stored in the volume remains intact on the host. 
+
+* If the volume given in the `-v <vol_name>:<mount_point>` option does not exist (i.e. is not created before hand using `docker volume cerate` command), the the docker automatically creates it. 
+
+* To see all the volumes, you can list the content of the `/var/lib/docker/volumes` folder. 
+
+### Volume Mounting vs. Bind Mounting
+
+* The above procedure with the volumes created (either manually or automatically by Docker) under `/var/lib/docker/volumes` folder is called **volume mounting**
+
+* If we don't want our data folder on the host to be under Docker volumes, we can use **bind mounting**
+  * We still use the same command as before, but this time we will provide the complete path to the folder we want to mount into the container (e.g. say a `~/data/mysql` folder at our home)
+  * `docker run -v ~/data/mysql:/var/lib/mysql mysql`
+
+* **Volume Mount**: mounts a volume from the Docker's volumes directory
+* **Bind Mount**: mounts a directory from any location on the docker host 
+
+* **Note:** using the `-v` is the old way, instead use the new option `--mount` which is more verbose, as we have to specify each parameter in a key=value format. 
+  * For example the previous command ca be written using the `--mount` option by giving the `type`, `source`, and the `target` parameters: 
+  * `docker run --mount type=bind,source=~/data/mysql,target=/var/lib/mysql mysql`
+  
+
+### Storage Drivers: 
+
+Who is responsible for doing all of these operations? e.g.
+  * maintaining the layered architecture
+  * creating a writable container layer
+  * moving files across layers for copy-on-write, 
+  * etc.
+
+* **Storage Driver**: Docker uses storage drivers to enable the layered architecture. 
+
+* Some of the common storage drivers are: 
+  * AUFS
+  * ZFS
+  * BTRFS
+  * Device Mapper
+  * Overlay
+  * Overlay2
+
+* The selection of the storage deriver depends on the underlying OS. 
+    * For example with Ubuntu, the default storage driver is AUFS, where as this storage driver is not available on other OSs such as Fedora or CentOS. In that case maybe the Device Mapper is a better option. 
+    * Docker will choose the best storage driver automatically based on the OS. 
+    * Different storage drivers also provide different performance, stability, and characteristics. So you may want to choose one that fits the needs of your application and organization. 
+
+
+# Docker Compose
+
