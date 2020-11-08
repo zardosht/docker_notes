@@ -397,7 +397,7 @@ Sets the value for an environment variable (`APP_COLOR`) inside container.
     5. Then copy the source code of the application to a location like `/opt` folder
     6. Then run the webserver using `flask` command.
 
-* Now we create a **Dokerfile** for these instructions for setting up our application: 
+* Now we create a **Dockerfile** for these instructions for setting up our application: 
 
 
 ```
@@ -436,7 +436,7 @@ The name of the image is the **account name** followed by the image name `my-cus
 
 ## Dockerfile
 
-* Has an INSTRUCTION fbased imageollowed by ARGUMENT format, e.g. FROM, RUN, COPY, and ENTRYPOINT are all instructions.
+* Has an INSTRUCTION followed by ARGUMENT format, e.g. FROM, RUN, COPY, and ENTRYPOINT are all instructions.
 * Each instruction instructs docker to perform an action when creating the image with the given argument. 
 
 * The first line `FROM Ubuntu` defines what the **base OS** should be for this image. Every Docker image must be based off on another image (the **base image**). Either an OS image, or another image that was created before based on an OS image. **All Dockerfiles must start with a FROM instruction**
@@ -671,4 +671,591 @@ Who is responsible for doing all of these operations? e.g.
 
 
 # Docker Compose
+
+* YAML: 
+
+
+* Recap:
+  * We first run how to run docker containers using `docker run` command.
+
+
+* If we needed to setup a complex application, running multiple services, a better way to do it is to use **Docker Compose**
+
+* With docker compose, we create a new configuration file called `docker-compose.yml` and put together the different services and the options for running them. 
+
+* Then we can simply run a `docker-compose up` command to bring up the entire application stack. 
+
+Instead of following four commands: 
+
+```bash
+
+
+$ docker run mmumshad/simple-webapp
+$ docker run mongodb
+$ docker run redis:alpine
+$ docker run:ansible
+```
+
+We can have the following single `docker-compose.yml` file for configuring all services required for the application
+
+```yaml
+services:
+  web:
+    image: "mmumshad/simple-webapp"
+  database:
+    image: "mongodb"
+  messaging:
+    image: "redis:alpine"
+  orchestration: 
+    image: "ansible"
+```
+
+* This is **easier to implement, run and maintain** since **as all configurations needed for the application and all changes are always stored in the docker-compose.yml configuration file** 
+
+* However this is all applicable to running containers on one single docker host. 
+
+
+## Example Application 
+
+Let's take a look at the docker's simple yet comprehensive sample applications, developed by docker to demonstrate the various features of running an **application stack** on docker. 
+
+* It is a voting application consisting of the following components, each communicating to the next one. 
+  * voting-app: a web app developed in python to provide an interface for the users to vote. User can select between two options, a dog and a cat. 
+  * in-memory DB: When user makes a selection the vote is stored in *redis*. redis in this case serves as a database in memory. 
+  * worker: The vote is then processed by worker, which is an application written in .Net
+  * db: The worker .Net application processes the vote, and updates our persistent database, which is a PostgresSQL database. This database simply has a table with number of votes for each category: cats and dogs. If users voted for any category, its corresponding column gets incremented. 
+  * result-app: Finally, the result of the voting is displayed in the result-app, which is another web application but this time developed in node.js. It reads the result of the votes from the SQL database and displays it to the user. 
+
+* **Note:** As we can see, this sample application (although very simple in concept) is developed as a combination of different services, different development tools, and multiple different development platforms, such as Python, .Net, and Node.js. 
+
+* It shows how easy it is using Docker to setup an entire complex application stack consisting different components and technologies. 
+
+* There is also **Docker Swarm** services and stacks setting up such an application on an **scalable cluster**. But let's us keep it aside for now, and see how we can put together this application stack on a **single docker host.**
+
+
+### Using `docker run` command: 
+
+* Let's first see how it would look like if we wanted to use `docker run` commends. We assume all images of the components of the application are already build and available on docker repository:
+
+```bash
+# data layer
+$ docker run -d --name=redis redis
+$ docker run -d --name=db postgres:9.4
+
+# application services
+$ docker run -d --name=vote -p 5000:80 voting-app
+$ docker run -d --name=result -p 5001:80 result-app
+$ docker run -d --name=worker worker
+```
+
+* The above commands look good, but it does not work, since we **haven't linked the components** together. 
+  * We haven't told the voting application to use this particular redis instance. 
+  * There could be multiple redis instances running. 
+  * Similarity we haven't told the worker and the result-app to use the this particular PostgresSQL database instance that we ran. 
+
+* For this we use **`--link`** option. The `--link <service-instance-container-name>:<name-to-be-resolved-in-service-client-container>` option allows a container to resolve another container by the name. For example 
+
+```bash
+$ docker run -d --name=redis redis
+$ docker run -d --name=vote -p 5000:80 --link redis:redis voting-app
+```
+
+* Note that for that to work, we need to name the containers when we run them.  
+
+* We can also use the simple `--link db` option, which creates a link with the same name (equivalent to `--link db:db`)
+
+* The `--link` option works by adding an entry in the `/ect/hosts` file of the service client container, e.g. the voting-app in our case, with the `<name-to-be-resolved-in-service-client-container>` and the internal IP address of the service provider container, e.g the redis container in our case. 
+
+* In our example, we now need to add the following `--link` options. Note that the worker application needs two `--link` options, one for the redis container and one for the PostgresSQL database: 
+
+```bash
+# data layer
+$ docker run -d --name=redis redis
+$ docker run -d --name=db postgres:9.4
+
+# application services
+$ docker run -d --name=vote -p 5000:80 --link redis:redis voting-app
+$ docker run -d --name=result -p 5001:80 --link db:db result-app
+$ docker run -d --name=worker --link db:db --link redis:redis worker
+```
+
+* Note that using `--link` option in Docker is deprecated now, in favor of advanced options in docker compose and swarm that allow achieving similar behavior in much better way. 
+
+### Using docker-compose.yml
+
+The equivalent `docker-compose.yml` configuration for our example above would be: 
+
+```yml
+redis: 
+  image: redis
+
+db:
+  image: postgres:9.4
+
+vote:
+  image: voting-app
+  ports: 
+    - 5000:80
+  links:
+    - redis
+
+result: 
+  image: result-app
+  ports: 
+    - 5001:80
+  links:
+    - db
+
+worker:
+  image: worker
+  links:
+    - redis
+    - db
+
+```
+
+* Now we only need to run a `$ docker-compose run` command to bring up the entire application stack.  
+
+
+## Docker compose - build
+
+* In our example, the images for redis and PostgresSQL already exist. They are official images available on Docker Hub. 
+
+* But what about the other three images? `voting-app`, `result-app`, `worker`? They are images of our own application. 
+
+* We can use the `build` option in `docker-compose.yml` to point Docker Compose to a directory where the code of the image **including a Dockerfile** resides: 
+
+```yml
+redis: 
+  image: redis
+
+db:
+  image: postgres:9.4
+
+vote:
+  build: ./voting-app
+  ports: 
+    - 5000:80
+  links:
+    - redis
+
+result: 
+  build: ./result-app
+  ports: 
+    - 5001:80
+  links:
+    - db
+
+worker:
+  build: ./worker
+  links:
+    - redis
+    - db
+
+```
+
+* The corresponding application directories in the above `docker-compose.yml` must contain a **`Dockerfile`** that instructs the Docker Compose how to build the image. 
+
+* This time when we call the `docker-compose up` command, it will first build the images, give a temporary name for them, and then it uses those images to build containers using the options we specified before. 
+
+## Docker Compose - Versions
+
+* Docker Compose evolved over time and there are different versions of it available, that support different options.  
+  * For example in Docker Compose version 1, it was not possible to define the deployment of images on networks other than bridge.  
+  * Or it was not possible in the version 1 of Docker Compose to specify the order of the containers starting. 
+
+* With Docker Compose version 2 and above, the format of the `docker-compose.yml` file also changed a little bit: 
+  * We no longer specify the application stack information as we used before. It is now all specified in the **`services` section**
+
+```yml
+
+version: 2
+
+services:
+  redis: 
+    image: redis
+
+  db:
+    image: postgres:9.4
+
+  vote:
+    build: ./voting-app
+    ports: 
+      - 5000:80
+    depends_on:
+      - redis
+
+  result: 
+    build: ./result-app
+    ports: 
+      - 5001:80
+
+  worker:
+    build: ./worker
+    depends_on:
+      - redis
+      - db
+
+```
+
+* From version 2 and above, the version of the Docker Compose must be specified at the top of `docker-compose.yml` file. 
+
+* Another difference between Docker Compose versions is **networking**:
+  * With **version 1**, docker compose attaches all the containers it runs to the **default bridged network** and then uses **links** to enable communication between containers
+  * With version 2, docker compose automatically creates a **dedicated bridge network for our application** and attaches all the containers to this network. All containers are then able to communicate with each other, using their corresponding **service names**. So, we basically don't need to use links in version 2 of docker compose. We can get rid of all the `links` section, when converting a file from docker compose version 1 to version 2. 
+  
+
+* In Docker Compose version 2 it is also possible to define **the startup order** of the containers. For that we can use the **`depends_on`** feature. 
+  * For example we can say, the `voting` application is dependent on the `redis`, to make sure that the `redis` application is started first, before the `voting` application. 
+
+* **Version 3** is the latest version of Docker Compose. 
+* Like version 2, version 3 also has the `version` at the top, and the application stack configuration (containers) are specified under `services` section. 
+* Version 3 provides support for **docker swarm**
+
+## Networking in Docker Compose
+
+* We so far used the default bridged network for all our containers. 
+* Let's say we want to  modify the application architecture a little bit, to separate the traffic from different sources: 
+  * We want to separate the user generated traffic, for the applications internal traffic. 
+  * So, we create a *front-end* network, dedicated to traffic from users, 
+  * and a *back-end* network, dedicated for traffic with-in the application. 
+  * We then connect the user facing applications (the `voting app` and the `result app`) to the `frontend network` and 
+  * and *all the components* to an internal `backend network`
+
+* So now we define the `networks` in the root level of our `docker-compose.yml`
+  * Then we define the network each container is going to use. 
+
+```yml
+version: 2
+services:
+  redis: 
+    image: redis
+    networks:
+      - back-end
+
+  db:
+    image: postgres:9.4
+    networks:
+      - back-end
+
+  vote:
+    build: ./voting-app
+    ports: 
+      - 5000:80
+    depends_on:
+      - redis
+    networks:
+      - front-end
+      - back-end
+
+  result: 
+    build: ./result-app
+    ports: 
+      - 5001:80
+    depends_on: 
+      - db
+    networks:
+      - front-end
+      - back-end
+
+  worker:
+    build: ./worker
+    depends_on:
+      - redis
+      - db
+    networks:
+      - back-end
+    
+networks: 
+  front-end:
+  back-end:
+
+```
+
+* https://docs.docker.com/compose/networking/ 
+
+
+# Docker Registry
+
+* Docker registry is the central repository of all docker images. 
+
+* Let's take an example: `docker run nginx`:
+  * Image name is: `nginx/nginx`. 
+  * The first part is the user name (or repository account name) in the registry, the second part is image name. 
+  * If the user name is not given, then it is assumed to default as image name. 
+
+* Where are the images stored and pulled from? 
+  * If we don't give a registry, the **default docker registry: Docker Hub** is used. Its DNS name is `docker.io`
+  
+* The registry is where all Docker images are stored. Whenever we created an image, we push it to registry. Whenever we pull an image, we pull it from the registry. 
+
+* There are many other popular registries: 
+  * Google's registry: `gcr.io`, where a lot of Kubernetes related images are stored. Like the one used for end-to-end testing on a cluster. These are all publicly available images that anyone can download. 
+
+* We can also host an internal private registry, that is not available to public. 
+  * Many cloud providers such as AWS, Azure, and GCP (Google Cloud Platforms) provide private registries when you created an account with them. 
+
+* On any registry, be it Docker hub, Google registry, or any other, it is possible to make a repository private:
+  * You first need to login to private registry with your username and password, e.g: 
+  * `docker login private-registry.io`
+  * Then you need to add the private registry in front of the repository and image name: 
+  * `docker run private-registry.io/apps/internal-app`
+  * If you forgot to login to the private registry, it will say cannot find image. 
+
+## Private Docker Registry
+
+* Cloud platforms like AWS and GCP provide private registries. But how to deploy a private registry on premise in our organization? 
+
+* Docker registry is itself a separate application, which is also available as a docker image. The name of the image is registry, and it exposes the API on port 5000:
+  * `docker run -d -p 5000:5000 --name registry registry:2`
+
+* Now how to push the images to our private registry?
+  * Use the `docker image tag` command to tag the docker image with the private registry:
+  * `docker image tag my-image localhost:5000/my-image`
+  * Then use the `docker push` command to push the image to the private registry:
+  * `docker push localhost:5000/my-image`
+
+* From there on, we can pull the image form the private registry, e.g.:
+  * `docker pull localhost:5000/my-image` or the IP or the host name of the docker registry computer if pulling from another computer, e.g. `docker pull 192.168.56.100:5000/my-image`
+
+
+
+# Docker Engine
+
+* A deeper look at Docker's architecture. 
+  * How it runs applications in isolated containers
+  * How it works under the hoods
+
+* Docker Engine: is simply referred to a host with Docker installed on it
+
+* When we install Docker on a linux host, we are actually installing three components: 
+  * the Docker daemon
+  * the REST API server
+  * and the docker-cli
+
+* The **Docker Daemon** is a background process that manages docker objects such as images, containers, volumes, and networks. 
+
+* The **Docker REST API** is an API interface that programs can use to talk to the docker daemon and provide instructions. You could write your own tools using this REST API
+
+* **Docker CLI** is the command line interface that we use to perform actions, such as running containers, creating images, and so on. It uses the REST API to interact with the Docker Daemon. 
+  * Note that Docker CLI need not necessarily to be on the same host. 
+  * It can be on another system, such as a laptop, and still work with the remote Docker Engine through the REST API
+  * Use `-H=<docker-engine-hostname>:2375` to talk to a docker engine that is on another machine other that the `docker-cli`, e.g.: 
+  * `docker run -H=10.123.2.1:2375 run nginx`
+
+## Containerization: How are applications containerized?
+
+* Docker uses namespaces to isolate workspace. 
+
+* Process ID, network, inter-process communication, mounts, and unix timesharing systems, are created in their own namespaces, thereby providing isolation between containers. 
+
+![alt](./images/namespaces.png)
+
+### Namespaces - PID
+
+* Let's have a look at one of the namespace isolation techniques: Process ID namespaces
+
+* On a Linux system, all processes are spawned from a **root process** with **PID 1**. The PIDs are unique, and two processes cannot have the same PID.
+
+* When we run a container, which is basically a child system within the current system, the child system needs to think that it is an independent system on its own, and it has its own set of processes, originating from the root process with the PID 1. 
+
+* But as we know, **there is not hard isolation between the container and the host**, that is, **the processes running on the container, are in fact processes running on the underlying host**
+  * But two processes cannot have the same PID
+  * This is where namespaces come to play
+  * With PID namespaces, each process can have multiple process IDs associated with it.  
+  * For example, when the processes start, they are actually just ordinary processes on the host, getting one of the available PIDs. 
+  * However they also get another process ID starting with PID 1 in the namespace of the container, which is only visible inside the container.
+  * So the container thinks that it has its own root process tree, and so it is an independent system. 
+
+* For example, if we run a `nginx` containers, the `nginx` service gets the PID 1 on the container. 
+  * But if we list all the processes on the Docker host, we see the same `nginx` service running with a different PID on the host. 
+
+* This way, the process on the container, are in fact running on the same host, but are separated into their own containers using namespaces
+
+![alt](./images/pid_namespaces.png)
+
+## cgroups (Control Groups)
+
+* The underlying Docker host as well as the containers, share the same system resources such as CPU and Memory
+  
+* How much of the resources are dedicated to the host and the containers, and how does Docker manage and share resources between containers? 
+
+* By default **there is no restriction as how much resource a container can use**. So a container may end up consuming all the resources on the underlying host. 
+
+* To restrict a container on its resource utilization (such as amount of CPU and memory) Docker use **cgroups (Control Groups)** to restrict the amount of Hardware resources allocated to each container. 
+  * This can be done by the `--cpus` option to the `docker run` command:
+  * `docker run --cpus=0.5 ubuntu`  
+  * will ensure that the container will not consume more than the allowed amount of CPU on the host at any given time. 
+  * same goes with memory using `--memory`
+  * `docker run --memory=100m ubuntu`
+
+
+# Container Orchestration
+
+* So far we have used a `docker run` command to run a single instance of the application
+  * e.g. to run a node.js instance, we run a `docker run nodejs` command
+
+* But that is just one instance of the application, on one docker host. 
+
+* What happens if the number of users increase and that instance is no longer able to handle the load? 
+
+* In that case we deploy additional instances of the application by running the `docker run nodejs` command multiple times. 
+
+* But that's something we have to do ourselves. 
+  * You have to keep an eye on the load and performance of the application and 
+  * deploy additional instances if needed
+  * And not only that, we have to keep an eye on health of each of these application instances, e.g. when they fail. 
+  * and if an application instance fails, we should be able to run the `docker run nodejs` again, to deploy another instance of the application. 
+
+* What about the health of the docker host itself? 
+  * What if it crashes and is not accessible
+  * The containers running on it will become inaccessible too. 
+
+* So how to solve these issues? 
+  * We will need a dedicated engineer that sits and monitors the load and performance of the application, deploys instances if needed, monitors the health of the applications, etc. 
+
+* But if we have large applications deployed with 10s of thousands of containers, that's not a practical approach. 
+
+* So, we can build our own scripts for automating the container monitoring and management task. 
+
+* **Container Orchestration** is a solution for that. 
+  * It is a solution that consists of a set of tools and scripts that can help host containers in a production environment 
+
+* Typically, a container orchestration solution consists of multiple docker hosts, that can host containers. 
+  * That way, if one fails, the applications is still accessible through the others. 
+  * `docker service --replicas=100 nodejs` deploys 100 instances of the nodejs image. 
+  
+* A container orchestration solution easily allows us to deploy 100s or 1000s instances of our application with a single command. 
+  * For example the above command is used for **Docker Swarm**
+
+* Some orchestration solutions can help you automatically scale up the containers when the users increases and automatically scale down the instances when the demand decreases. 
+
+* Some orchestration solutions can even automatically add new Docker hosts to handle additional load. 
+
+* Beside **clustering and scaling**, some orchestration solutions also provide possibility for **advanced networking between containers** across different hosts, **load balancing** across different hosts, **sharing storage resources** between the hosts, **support for configuration management** and **security** within the cluster. 
+
+## Solutions
+
+* There are multiple **Container Orchestration** solutions available 
+  * **Docker Swarm**
+  * **kubernetes** from Google
+  * **MESOS** from Apache
+
+* Docker Swarm is really easy to setup and get started, but it lacks some of the advanced auto-scaling features required for complex production grade applications. 
+
+* MESOS is quite difficult to setup and get started, but supports many advanced features
+
+* kubernetes, arguably the most popular of it all, is a little bit difficult to setup and get started, but it provides a lot of options to customize deployments and has support for many different vendors. 
+  * Kubernetes is now provided on all public cloud service providers, like AWS, Azure, and GCP 
+  * and the kubernetes project is one of the top ranked projects on Github. 
+
+
+# Docker Swarm
+
+
+* Docker Swarm has a lot of concepts and requires its own course, but this is a very quick introduction to Docker Swarm to get familiar with basic details. 
+
+* Docker Swarm allows combining multiple Docker host machines into a single cluster. 
+
+* Docker Swarm takes care of distributing application instances and services into different host to achieve high availability and load balancing across different systems and hardware. 
+
+* To setup Docker Swarm, we must first have hosts, or multiple host with Docker installed on them. 
+  * Then we must designated one host to be the **Swarm Manager**
+  * and others as the **workers**
+
+* Then we run `docker swarm init` on the swarm manager. The output also provides the commands to be run on the worker.
+* So run the command `docker swarm join --toke <token>` on worker nodes to the join the swarm 
+
+* After joining the swarm, the workers are also referred to as nodes, and we are now ready to create services and deploy them on the swarm cluster. 
+
+## Details: Docker Service
+
+* As we already know, to run an instance of `my-web-server` we run the command `docker run my-web-server` command with the name of the image I want. This creates a new container instance with my application that serves `my-web-server`
+
+* With a swarm cluster, I can now utilize my swarm to offer my service. 
+
+* Docker services are the key component of Docker Swarm orchestration. 
+
+* Docker services are oen or more instances of an application or service that run across the nodes in the swarm cluster. For example we could created a service to run multiple instances of `my-web-server` application across the nodes of the docker swarm. 
+
+* For this we run the following command **on swarm manager**:
+* `docker service create --replicas=3 my-web-server`
+* The option `--replicas=3` creates three instances of my service and distributes them across the cluster. 
+
+* The `docker service create` command must be run on the docker swarm manager and not on the worker nodes. 
+
+* The `docker service create` command is similar to `docker run` command in options like environment using `-e`, publishing ports using `-v`, networks options, etc. e.g: 
+  * `docker service create --replicas=3 --network frontend my-web-server` 
+  * `docker service create --replicas=3 -p 8080:80 my-web-server` 
+
+
+# Kubernetes
+
+* kubernetes too requires its own course. But here is a basic introduction to its concepts. 
+
+* With `docker run` we can run a single instance of an application
+
+* Kubernetes Cluster (node, node, ...), POD AutoScalers (scale up the containers), Cluster AutoScalers (scale up the nodes)
+
+
+* With kubernetes, using the kubernetes CLI, `kubectl` we can run thousands of instances of an image: 
+* `kubectl run --replicas=1000 my-web-server`
+
+* Kubernetes can scale the instances and infrastructure automatically based on the load. 
+  * `kubectl scale --replicas=2000 my-web-server`
+
+* It allows upgrading the instances in a **rolling upgrade** fashion (one at a time): 
+  * `kubectl rolling-update my-web-server --image=web-server:2`
+
+* It can rollback the images if something goes wrong: 
+  * `kubectl rolling-update my-web-server --rollback`
+
+* It allows A-B testing of the new features of the application, by only updating a given percentages of the containers to a new feature. 
+
+* The open architecture of kubernetes provides support for many many network and storage vendors. All network and storage vendor have plugins for kubernetes. 
+
+* It supports a majority of authentication and authorization processes. 
+
+* All major cloud providers have support for kubernetes
+
+### What is the relationship between Docker and Kubernetes? 
+
+* Kubernetes uses docker host to host applications as docker containers. 
+
+* Well it need not be Docker all the time, as kubernetes supports alternatives to Docker, such as rkt /rocket/ or cri-o /kraio/. 
+
+### Kubernetes Architecture:
+
+* A k8s cluster consists of a set of nodes 
+* A nodes is physical or virtual machine where k8s software is installed. 
+* A node is a worker machine where the containers will be launched by k8s. 
+* So, if a node fails, all the containers go down. So we need more than one node. 
+* A cluster is a set of nodes grouped together. So if a node fails, the application is still accessible from other nodes. 
+* A cluster has **Master Node**, where the k8s control components are installed. It watches over the nodes in the cluster, and is responsible for the actual orchestration of the nodes within the cluster. 
+* When we install k8s on a system, we actually install the following components on the system:
+  * API server: acts as the frontend for k8s. User's management devices, command line interfaces, all talk to the API server to interact with the k8s cluster.
+  * etcd server: the **etcd** is distributed reliable key-value store, where k8s stores all the data to manage the cluster. When we have multiple nodes and multiple masters in a cluster, etcd stores all those information to manage the cluster on all the nodes in a distributed manner. etcd is responsible for implementing the locks within the cluster to ensure no conflict occurs between the masters. 
+  * kublet service: is the agent that runs on each node on the cluster. The agent is responsible for making sure that the container are running on the ndoe as expected. 
+  * container runtime: the underlying software that is used to run containers. In our case this docker. 
+  * controllers: are teh brain behind orchestration. They are responsible for noticing and responding when nodes, containers, or networks go down. They make decisions to bring up new containers or nodes. 
+  * scheduler: is responsible for distributing work or containers across multiple nodes. It looks for newly created containers and assigns them to nodes. 
+
+
+* `kubectl` is the command line tool for interacting with k8s, like 
+  * deploy and manage applications on a k8s cluster and 
+  * get cluster information, 
+  * get status of the nodes, 
+  * etc.
+
+* Run applications on the cluster:
+  * `kubectl run hello-minikube`
+
+* View information about the cluster: 
+  * `kubectl cluster-info`
+  
+* List all the nodes on the cluster;
+  * `kubectl get nodes`
+
+* So to run 100 instances of an application, across 100s of nodes, all we need is the following command: 
+  * `kubectl run my-web-app --image=my-web-app --replicas=100`
 

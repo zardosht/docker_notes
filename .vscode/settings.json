@@ -1,3 +1,28 @@
 {
-    "python.pythonPath": "/home/zardosht/.virtualenvs/udacity/bin/python"
+    "python.pythonPath": "/home/zardosht/.virtualenvs/udacity/bin/python",
+    "cSpell.words": [
+        "BTRFS",
+        "MESOS",
+        "SCEA",
+        "allnodes",
+        "allrouters",
+        "aufs",
+        "cgroups",
+        "containerd",
+        "cowsay",
+        "datadir",
+        "enginx",
+        "gnupg",
+        "kodekloud",
+        "kraio",
+        "kubectl",
+        "kublet",
+        "localnet",
+        "mcastprefix",
+        "mestorf",
+        "mmumshad",
+        "runc",
+        "varahamihira",
+        "whalesay"
+    ]
 }
